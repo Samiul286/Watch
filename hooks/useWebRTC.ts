@@ -13,6 +13,7 @@ export const useWebRTC = (roomId: string, userId: string) => {
   const [remoteStreams, setRemoteStreams] = useState<{ [peerId: string]: MediaStream }>({});
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [connectionStates, setConnectionStates] = useState<{ [peerId: string]: string }>({});
   
   const peerConnections = useRef<{ [peerId: string]: RTCPeerConnection }>({});
   const signalingRef = useRef<any>(null);
@@ -20,8 +21,12 @@ export const useWebRTC = (roomId: string, userId: string) => {
 
   const configuration = {
     iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' }
-    ]
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun.stunprotocol.org:3478' }
+    ],
+    iceCandidatePoolSize: 10
   };
 
   // Clean up peer connection
@@ -40,26 +45,68 @@ export const useWebRTC = (roomId: string, userId: string) => {
 
   // Initialize local media stream
   const initializeMedia = useCallback(async () => {
+    // Check if getUserMedia is supported
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.error('getUserMedia is not supported in this browser');
+      alert('Your browser does not support camera/microphone access. Please use a modern browser like Chrome, Firefox, or Safari.');
+      return null;
+    }
+
     try {
+      console.log('Requesting media permissions...');
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true
       });
+      
+      console.log('Media stream obtained:', {
+        videoTracks: stream.getVideoTracks().length,
+        audioTracks: stream.getAudioTracks().length
+      });
+      
+      // Check if tracks are enabled
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+      
+      if (videoTrack) {
+        setIsVideoEnabled(videoTrack.enabled);
+        console.log('Video track enabled:', videoTrack.enabled);
+      }
+      
+      if (audioTrack) {
+        setIsAudioEnabled(audioTrack.enabled);
+        console.log('Audio track enabled:', audioTrack.enabled);
+      }
+      
       setLocalStream(stream);
       return stream;
     } catch (error) {
       console.error('Error accessing media devices:', error);
+      
       // Try audio only if video fails
       try {
+        console.log('Trying audio-only fallback...');
         const audioStream = await navigator.mediaDevices.getUserMedia({
           video: false,
           audio: true
         });
+        
+        console.log('Audio-only stream obtained:', {
+          audioTracks: audioStream.getAudioTracks().length
+        });
+        
+        const audioTrack = audioStream.getAudioTracks()[0];
+        if (audioTrack) {
+          setIsAudioEnabled(audioTrack.enabled);
+          console.log('Audio track enabled:', audioTrack.enabled);
+        }
+        
         setLocalStream(audioStream);
         setIsVideoEnabled(false);
         return audioStream;
       } catch (audioError) {
         console.error('Error accessing audio:', audioError);
+        alert('Could not access microphone or camera. Please check your browser permissions and make sure you are using HTTPS.');
         return null;
       }
     }
@@ -103,9 +150,16 @@ export const useWebRTC = (roomId: string, userId: string) => {
 
     // Handle connection state changes
     peerConnection.onconnectionstatechange = () => {
-      if (peerConnection.connectionState === 'failed' || 
-          peerConnection.connectionState === 'disconnected' ||
-          peerConnection.connectionState === 'closed') {
+      const state = peerConnection.connectionState;
+      console.log(`Connection state for ${peerId}:`, state);
+      
+      setConnectionStates(prev => ({
+        ...prev,
+        [peerId]: state
+      }));
+      
+      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+        console.log(`Cleaning up failed connection for ${peerId}`);
         cleanupPeerConnection(peerId);
       }
     };
@@ -218,7 +272,12 @@ export const useWebRTC = (roomId: string, userId: string) => {
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
         setIsVideoEnabled(videoTrack.enabled);
+        console.log('Video toggled:', videoTrack.enabled ? 'ON' : 'OFF');
+      } else {
+        console.warn('No video track found');
       }
+    } else {
+      console.warn('No local stream available');
     }
   }, [localStream]);
 
@@ -229,7 +288,12 @@ export const useWebRTC = (roomId: string, userId: string) => {
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setIsAudioEnabled(audioTrack.enabled);
+        console.log('Audio toggled:', audioTrack.enabled ? 'ON' : 'OFF');
+      } else {
+        console.warn('No audio track found');
       }
+    } else {
+      console.warn('No local stream available');
     }
   }, [localStream]);
 
@@ -256,6 +320,7 @@ export const useWebRTC = (roomId: string, userId: string) => {
     remoteStreams,
     isVideoEnabled,
     isAudioEnabled,
+    connectionStates,
     initializeMedia,
     startCall,
     toggleVideo,

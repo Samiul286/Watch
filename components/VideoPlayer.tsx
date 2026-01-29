@@ -31,18 +31,22 @@ export default function VideoPlayer({ videoState, onStateChange, userId }: Video
         player.seekTo(videoState.playedSeconds, 'seconds');
       }
 
-      // Sync play/pause state
-      if (videoState.isPlaying && !player.getInternalPlayer()?.paused) {
-        // Already playing
-      } else if (!videoState.isPlaying && player.getInternalPlayer()?.paused) {
-        // Already paused
-      } else {
-        // Need to sync play/pause state
+      // Sync play/pause state safely
+      const internalPlayer = player.getInternalPlayer();
+      if (internalPlayer) {
         setTimeout(() => {
-          if (videoState.isPlaying) {
-            player.getInternalPlayer()?.play();
-          } else {
-            player.getInternalPlayer()?.pause();
+          try {
+            if (videoState.isPlaying) {
+              if (typeof internalPlayer.play === 'function') {
+                internalPlayer.play();
+              }
+            } else {
+              if (typeof internalPlayer.pause === 'function') {
+                internalPlayer.pause();
+              }
+            }
+          } catch (error) {
+            console.warn('Error syncing video state:', error);
           }
         }, 100);
       }
